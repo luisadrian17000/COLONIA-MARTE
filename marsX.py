@@ -11,7 +11,7 @@ PEATON_NUMBER = 10
 DOME_NUMBER = 5
 N_STEPS = 50
 DAY_NIGHT_TIME = 10
-NUMBER_OF_DAY_NIGHT_CYCLES = DAY_NIGHT_TIME / N_STEPS  # (Ejemplo, no se usa en este código)
+NUMBER_OF_DAY_NIGHT_CYCLES = DAY_NIGHT_TIME / N_STEPS 
 
 # --- 1. Define la tabla de color-a-número ---
 color_mapping = {
