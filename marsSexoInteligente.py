@@ -1,3 +1,4 @@
+
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -5,23 +6,16 @@ from PIL import Image
 import agentpy as ap
 import os
 import requests
-from anyio import sleep_forever
 from dotenv import load_dotenv
-from jedi.inference.value.instance import SelfName
 
-# --------------
 
 load_dotenv()
 API_KEY_FROM_FILE = os.getenv("API_KEY")
 
-
 def send_whole_simulation(simulation_data):
     API_URL = "http://127.0.0.1:5000/simulation_data"
-    # API_URL = "https://tc2008b-rest-api.onrender.com/simulation_data"
     API_KEY = API_KEY_FROM_FILE
-    HEADERS = {"Content-Type": "application/json",
-               "X-API-KEY": API_KEY
-               }
+    HEADERS = {"Content-Type": "application/json", "X-API-KEY": API_KEY}
     try:
         response = requests.post(url=API_URL, json=simulation_data, headers=HEADERS)
         response.raise_for_status()
@@ -32,33 +26,39 @@ def send_whole_simulation(simulation_data):
 
 
 # --- Parámetros del modelo ---
-SPAWN_RATE_EXPLORER = 2
-GRID_SIZE = 20
-PEATON_NUMBER = 10
-DOME_NUMBER = 50
+SPAWN_RATE_EXPLORER = 1
+GRID_SIZE = 12
+PEATON_NUMBER = 150
+DOME_NUMBER = 80
 N_STEPS = 200
 DAY_NIGHT_TIME = 10
-NUMBER_OF_DAY_NIGHT_CYCLES = DAY_NIGHT_TIME / N_STEPS  # (Ejemplo, no se usa en este código)
-DOMES_Z_VALUE = 0
-OXYGEN_Z_VALUE = 1
-OXYGEN_N = 10
+OXYGEN_N = 100
 N_ANUNCIOS = 20
+N_DEFENSESYSTMES = 20
+N_SOLAR_PANELS = 50
+N_ALIENPLANTS = 180
+N_FOODTRUCK = 40
+N_PUBLICLAMP = 30
+N_SPACEEQUIPMENT = 80
+DOMES_Z_VALUE = 0
+OXYGEN_Z_VALUE = 0
 PEATON_Z_VALUE = 0
-EXPLORERS_Z_VALUE = 1
+EXPLORERS_Z_VALUE = 0
+
 
 # --- 1. Define la tabla de color-a-número ---
 color_mapping = {
-    (255, 0, 0): 1,  # Building (Red: FF0000)
-    (255, 180, 0): 2,  # Street (Orange: FFB400)
-    (0, 255, 38): 3,  # Sidewalk (Green: 00FF26)
-    (255, 0, 157): 4,  # Crosswalk (Pink: FF009D)
-    (0, 49, 255): 5,  # Traffic Light (Blue: 0031FF)
-    (0, 255, 253): 6,  # Building/Dome Spawn Area (Cyan: 00FFFD)
-    (0, 0, 0): 7  # Agent Spawn Points (Black: 000000)
+    (255, 0, 0): 1,
+    (255, 180, 0): 2,
+    (0, 255, 38): 3,
+    (255, 0, 157): 4,
+    (0, 49, 255): 5,
+    (0, 255, 253): 6,
+    (0, 0, 0): 7
 }
 
 # --- 2. Carga la imagen base de la ciudad ---
-image_path = "citygrid.png"  # Ajusta la ruta si es necesario
+image_path = "citygrid.png"
 image = Image.open(image_path).convert("RGB")
 image_array = np.array(image)
 
@@ -69,15 +69,12 @@ for i in range(image_array.shape[0]):
         pixel = tuple(image_array[i, j])
         base_grid[i, j] = color_mapping.get(pixel, 0)
 
-
 # --- 4. Expande la grilla base ---
 def expand_city_grid(base, repetitions_x=2, repetitions_y=2):
     return np.tile(base, (repetitions_y, repetitions_x))
 
-
 city_grid = expand_city_grid(base_grid, repetitions_x=GRID_SIZE, repetitions_y=GRID_SIZE)
 city_size = city_grid.shape
-
 
 # ============= AGENTES =============
 
@@ -87,59 +84,35 @@ class MovingAgent(ap.Agent):
         if len(valid_positions) == 0:
             raise ValueError("No valid spawn points (7) found!")
         self.x, self.y = map(int, valid_positions[np.random.randint(len(valid_positions))])
-        self.oxigenLevel = 20
+        self.oxigenLevel = 3
         self.dome_id = None
         self.is_active = True
-
-        # Q-learning initialization
-        self.q_table = {}  # Q-table: {state: {action: value}}
-        self.alpha = 0.1  # Learning rate
-        self.gamma = 0.9  # Discount factor
-        self.epsilon = 0.2  # Exploration rate
+        self.q_table = {}
+        self.alpha = 0.1
+        self.gamma = 0.9
+        self.epsilon = 0.2
 
     def get_state(self):
-        """
-        Define el estado del agente. Esto es crucial para el Q-learning.
-        El estado debe incluir información relevante para la toma de decisiones.
-        Ejemplo: Posición del agente, cercanía a puntos de oxígeno, presencia de peatones cercanos, etc.
-        """
-        # Ejemplo de estado: (x, y, oxigenLevel, proximity_to_oxygen)
-        # Implementa una lógica para determinar la proximidad a los puntos de oxígeno
-        proximity_to_oxygen = self.check_proximity_to_oxygen()  # Función por definir
-        return (self.x, self.y, self.oxigenLevel, proximity_to_oxygen)
+        neighborhood = city_grid[max(0, self.x - 1):min(city_size[0], self.x + 2),
+                                max(0, self.y - 1):min(city_size[1], self.y + 2)].flatten()
+        proximity_to_oxygen = self.check_proximity_to_oxygen()
+        return (tuple(neighborhood), self.oxigenLevel, proximity_to_oxygen)
 
     def check_proximity_to_oxygen(self):
-        """
-        Calcula la proximidad a los puntos de oxígeno.
-        Esta función debe implementarse según la lógica del juego.
-        Por ejemplo, podría devolver la distancia al punto de oxígeno más cercano.
-        """
-        # Implementar la lógica para verificar la cercanía a los puntos de oxígeno
-        # Puedes usar la distancia euclidiana o Manhattan
         min_distance = float('inf')
         for oxygen_point in self.model.oxygen_points:
             distance = abs(self.x - oxygen_point.x) + abs(self.y - oxygen_point.y)
             min_distance = min(min_distance, distance)
-
-        if min_distance < 10:  # Umbral de proximidad
-            return True
-        else:
-            return False
+        return min_distance < 10
 
     def choose_action(self, state):
-        """
-        Selecciona una acción basada en la política épsilon-greedy.
-        """
         if np.random.rand() < self.epsilon:
-            # Exploración: Elige una acción aleatoria
             directions = [(6, 0), (-6, 0), (0, 6), (0, -6)]
             return directions[np.random.randint(len(directions))]
         else:
-            # Explotación: Elige la acción con el valor Q más alto
             if state in self.q_table and self.q_table[state]:
                 return max(self.q_table[state], key=self.q_table[state].get)
             else:
-                # Si el estado es nuevo, elige una acción aleatoria
                 directions = [(6, 0), (-6, 0), (0, 6), (0, -6)]
                 return directions[np.random.randint(len(directions))]
 
@@ -149,79 +122,52 @@ class MovingAgent(ap.Agent):
         dx, dy = action
         new_x, new_y = self.x + dx, self.y + dy
 
-        # Verificar si el movimiento es válido
         if (0 <= new_x < city_size[0] and 0 <= new_y < city_size[1] and
                 all(city_grid[self.x + i * np.sign(dx), self.y + i * np.sign(dy)] in (2, 4, 7)
                     for i in range(1, 6 + 1))):
-            old_x, old_y = self.x, self.y
-            self.x, self.y = new_x, new_y
+            old_x, old_y = self.x, self.y = new_x, new_y
             new_state = self.get_state()
-            reward = self.get_reward()  # Obtener recompensa
+            reward = self.get_reward()
             self.update_q_table(state, action, new_state, reward)
         else:
-            reward = -5  # Penalización por movimiento inválido
-            new_state = self.get_state()  # El estado no cambia
+            reward = -5
+            new_state = self.get_state()
             self.update_q_table(state, action, new_state, reward)
 
-        if self.oxigenLevel > 0:
-            self.oxigenLevel -= 1
+        self.oxigenLevel = max(0, self.oxigenLevel - 1)
         if self.oxigenLevel <= 0:
             self.model.remove_agent(self)
             self.is_active = False
 
     def get_reward(self):
-        """
-        Define la función de recompensa.
-        Esto es crucial para guiar el aprendizaje del agente.
-        Ejemplos:
-        -   Recompensa positiva por acercarse a un punto de oxígeno.
-        -   Recompensa negativa por chocar con un peatón.
-        -   Pequeña penalización por cada paso para fomentar la eficiencia.
-        """
-        reward = -1  # Penalización por cada paso (fomenta la eficiencia)
-
-        # Recompensa por acercarse a un punto de oxígeno
+        reward = -1
         if self.check_proximity_to_oxygen():
             reward += 5
-
-        # Penalización por "colisión" con peatones (necesitas implementar la lógica de detección de colisiones)
         for peaton in self.model.peatones:
             if self.x == peaton.x and self.y == peaton.y:
-                reward -= 10  # Penalización fuerte por colisión
-
-        # Recompensa por recoger oxígeno (si implementas la recolección)
-        # if self.oxigenLevel > previous_oxigenLevel:
-        #    reward += 10
-
+                reward -= 10
         return reward
 
     def update_q_table(self, state, action, new_state, reward):
-        """
-        Actualiza la tabla Q utilizando la ecuación de Q-learning.
-        """
         if state not in self.q_table:
             self.q_table[state] = {}
         if action not in self.q_table[state]:
-            self.q_table[state][action] = 0  # Inicializar el valor Q
-
+            self.q_table[state][action] = 0
         old_value = self.q_table[state][action]
-        next_max = max(self.q_table.get(new_state, {0: 0}).values())  # Valor Q máximo del siguiente estado
+        next_max = max(self.q_table.get(new_state, {0: 0}).values())
         new_value = (1 - self.alpha) * old_value + self.alpha * (reward + self.gamma * next_max)
         self.q_table[state][action] = new_value
 
     def action(self):
-        if self.oxigenLevel > 0:
-            self.oxigenLevel -= 1  # Reduce oxygen by 1 per step
-        if self.oxigenLevel <= 0:
-            self.model.remove_agent(self)
-            self.is_active = False
+        pass
+
 
 
 class Advertisement(ap.Agent):
 
     def setup(self):
         self.anouncement_id = self.id
-        valid_positions = np.argwhere(city_grid == 1)
+        valid_positions = np.argwhere(city_grid == 2)
 
         if len(valid_positions) == 0:
             raise ValueError("No valid spawn points (1) found!")
@@ -237,14 +183,73 @@ class Advertisement(ap.Agent):
         #print(f"anuncio en la posicion {self.x}, {self.y}")
         pass
 
+class DefenseSystmes(ap.Agent):
+
+    def setup(self):
+        self.defenseSystems = self.id
+        valid_positions = np.argwhere(city_grid == 1)
+
+        if len(valid_positions) == 0:
+            raise ValueError("No valid spawn points (1) found!")
+        self.x, self.y = map(int, valid_positions[np.random.randint(len(valid_positions))])
 
 
+class SolarPanels(ap.Agent):
+
+    def setup(self):
+        self.solarPanels = self.id
+        valid_positions = np.argwhere(city_grid == 1)
+
+        if len(valid_positions) == 0:
+            raise ValueError("No valid spawn points (1) found!")
+        self.x, self.y = map(int, valid_positions[np.random.randint(len(valid_positions))])
+
+
+class AlienPlants(ap.Agent):
+
+    def setup(self):
+        self.alienPlants = self.id
+        valid_positions = np.argwhere(city_grid == 1)
+
+        if len(valid_positions) == 0:
+            raise ValueError("No valid spawn points (1) found!")
+        self.x, self.y = map(int, valid_positions[np.random.randint(len(valid_positions))])
+
+
+class FoodTruck(ap.Agent):
+
+    def setup(self):
+        self.foodTruck= self.id
+        valid_positions = np.argwhere(city_grid == 1)
+
+        if len(valid_positions) == 0:
+            raise ValueError("No valid spawn points (1) found!")
+        self.x, self.y = map(int, valid_positions[np.random.randint(len(valid_positions))])
+
+class SpaceEquipment(ap.Agent):
+
+    def setup(self):
+        self.spaceEquipment= self.id
+        valid_positions = np.argwhere(city_grid == 1)
+
+        if len(valid_positions) == 0:
+            raise ValueError("No valid spawn points (1) found!")
+        self.x, self.y = map(int, valid_positions[np.random.randint(len(valid_positions))])
+
+class PublicLamp(ap.Agent):
+
+    def setup(self):
+        self.publicLamp= self.id
+        valid_positions = np.argwhere(city_grid == 1)
+
+        if len(valid_positions) == 0:
+            raise ValueError("No valid spawn points (1) found!")
+        self.x, self.y = map(int, valid_positions[np.random.randint(len(valid_positions))])
 
 
 
 class Dome(ap.Agent):
     """
-    - Spawnea en celdas 6 (Cyan).
     - Cada step crea un MovingAgent.
     - Desaparece si todos sus explorers tienen oxígeno 0.
     """
@@ -259,19 +264,21 @@ class Dome(ap.Agent):
         self.x, self.y = map(int, px)
 
     def action(self):
-        new_explorers = []
-        for _ in range(self.spawn_rate):
-            explorer = MovingAgent(self.model)
-            explorer.dome_id = self.id
-            self.spawned_explorers.append(explorer)
-            new_explorers.append(explorer)
-            self.model.agents.append(explorer)
-            self.model.all_agents.append(explorer)
+        # Check if it's time to spawn explorers
+        if self.model.steps_counter % self.model.spawn_interval == 0: # Añadido
+            new_explorers = []
+            for _ in range(self.spawn_rate):
+                explorer = MovingAgent(self.model)
+                explorer.dome_id = self.id
+                self.spawned_explorers.append(explorer)
+                new_explorers.append(explorer)
+                self.model.agents.append(explorer)
+                self.model.all_agents.append(explorer)
 
-            # Spawnear al explorer en celdas 7 (manualmente)
-            valid_positions = np.argwhere(city_grid == 7)
-            px = valid_positions[np.random.randint(len(valid_positions))]
-            explorer.x, explorer.y = map(int, px)
+                # Spawnear al explorer en celdas 7 (manualmente)
+                valid_positions = np.argwhere(city_grid == 7)
+                px = valid_positions[np.random.randint(len(valid_positions))]
+                explorer.x, explorer.y = map(int, px)
 
         # Si todos sus explorers tienen oxígeno <= 0 => remove dome
         if self.spawned_explorers and all(ex.oxigenLevel <= 0 for ex in self.spawned_explorers):
@@ -311,6 +318,7 @@ class Peaton(ap.Agent):
     - Muere si colisiona con un MovingAgent.
     """
     def setup(self):
+
         valid_positions = np.argwhere(city_grid == 3)
         if len(valid_positions) == 0:
             raise ValueError("No valid sidewalk (3) to spawn a Peaton!")
@@ -360,7 +368,6 @@ class Sol(ap.Agent):
         self.contador += 1
         if self.contador % self.cambio_intervalo == 0:
             self.estado = "noche" if self.estado == "día" else "día"
-            #print(f"*** SOL => Ahora es {self.estado.upper()} ***")
 
 
 
@@ -369,10 +376,21 @@ class CityModel(ap.Model):
     def setup(self):
         self.grid = city_grid
 
+        self.steps_counter = 0
+        self.spawn_interval = 3
+
         # 1) Domes
         self.domeAgents = ap.AgentList(self, DOME_NUMBER, Dome)
 
         self.anuncios = ap.AgentList(self, N_ANUNCIOS, Advertisement)
+
+        self.defenseSystems = ap.AgentList(self, N_DEFENSESYSTMES, DefenseSystmes)
+        self.solarPanels = ap.AgentList(self, N_SOLAR_PANELS, SolarPanels)
+        self.alienPlants = ap.AgentList(self, N_ALIENPLANTS, AlienPlants)
+        self.foodTruck= ap.AgentList(self, N_FOODTRUCK, FoodTruck)
+        self.spaceEquipment= ap.AgentList(self, N_SPACEEQUIPMENT, SpaceEquipment)
+        self.publicLamp= ap.AgentList(self, N_PUBLICLAMP, PublicLamp )
+
 
         # 2) MovingAgents (creados por Dome.action())
         self.agents = ap.AgentList(self)
@@ -406,6 +424,12 @@ class CityModel(ap.Model):
         self.all_agents += self.peatones
         self.all_agents.append(self.sol)
         self.all_agents +=  self.anuncios
+        self.all_agents += self.defenseSystems
+        self.all_agents += self.solarPanels
+        self.all_agents += self.alienPlants
+        self.all_agents += self.foodTruck
+        self.all_agents += self.spaceEquipment
+        self.all_agents += self.publicLamp
 
         self.steps_counter = 0
         # DATA for api
@@ -449,6 +473,70 @@ class CityModel(ap.Model):
             for advertisement_agent, pos in zip(self.anuncios, [(anuncio.x,anuncio.y) for anuncio in self.anuncios])
         ]
 
+        defenseSystem_positions_dics = [
+            {
+                "id": int(defense_system_agent.id),
+                "x": int(pos[0]),
+                "y": int(DOMES_Z_VALUE),
+                "z": int(pos[1]),
+            }
+            for defense_system_agent, pos in zip(self.defenseSystems, [(defense.x, defense.y) for defense in self.defenseSystems])
+        ]
+
+        solarPanels_positions_dics = [
+            {
+                "id": int(solar_panel_agent.id),
+                "x": int(pos[0]),
+                "y": int(DOMES_Z_VALUE),
+                "z": int(pos[1]),
+            }
+            for solar_panel_agent, pos in zip(self.solarPanels, [(solar.x, solar.y) for solar in self.solarPanels])
+        ]
+
+        alien_plants_positions_dics = [
+            {
+                "id": int(alien_plants_agent.id),
+                "x": int(pos[0]),
+                "y": int(DOMES_Z_VALUE),
+                "z": int(pos[1]),
+            }
+            for alien_plants_agent, pos in zip(self.alienPlants, [(alien.x, alien.y) for alien in self.alienPlants])
+        ]
+
+        food_truks_dics = [
+            {
+                "id": int(food_trucks_agent.id),
+                "x": int(pos[0]),
+                "y": int(DOMES_Z_VALUE),
+                "z": int(pos[1]),
+            }
+            for food_trucks_agent, pos in zip(self.foodTruck, [(food.x, food.y) for food in self.foodTruck])
+        ]
+
+        space_equipment_dics = [
+            {
+                "id": int(space_equipment_agent.id),
+                "x": int(pos[0]),
+                "y": int(DOMES_Z_VALUE),
+                "z": int(pos[1]),
+            }
+            for space_equipment_agent, pos in zip(self.spaceEquipment, [(space.x, space.y) for space in self.spaceEquipment])
+        ]
+
+        public_lamp_dics = [
+            {
+                "id": int(public_lamp_agent.id),
+                "x": int(pos[0]),
+                "y": int(DOMES_Z_VALUE),
+                "z": int(pos[1]),
+            }
+            for public_lamp_agent, pos in zip(self.publicLamp, [(lamp.x, lamp.y) for lamp in self.publicLamp])
+        ]
+
+
+
+
+
         self.simulation_data = {}
         self.simulation_data["grid_size"] = GRID_SIZE
         self.simulation_data["shelters_n"] = DOME_NUMBER
@@ -462,12 +550,12 @@ class CityModel(ap.Model):
         self.simulation_data["semaforos"] = semaforos_positions_dics
         self.simulation_data["peatones_positions"] = []
         self.simulation_data["advertisement"] = advertisement_positions_dics
-        self.simulation_data["defense_systems"] = []
-        self.simulation_data["solar_panels"] = []
-        self.simulation_data['alien_plants'] = []
-        self.simulation_data["food_trucks"] = []
-        self.simulation_data['space_equipment'] = []
-        self.simulation_data['public_lamp'] = []
+        self.simulation_data["defense_systems"] = defenseSystem_positions_dics
+        self.simulation_data["solar_panels"] = solarPanels_positions_dics
+        self.simulation_data['alien_plants'] = alien_plants_positions_dics
+        self.simulation_data["food_trucks"] = food_truks_dics
+        self.simulation_data['space_equipment'] = space_equipment_dics
+        self.simulation_data['public_lamp'] = public_lamp_dics
 
     def finalize_simulation_data(self):
 
@@ -475,6 +563,9 @@ class CityModel(ap.Model):
 
     def step(self):
         # a) Semáforos
+
+
+
         for s in self.semaforos:
             s.step()
 
@@ -502,6 +593,7 @@ class CityModel(ap.Model):
             anuncio.step()
             anuncio.action()
 
+
         # g) El Sol alterna día/noche
         self.sol.step()
         self.collect_step_data()
@@ -522,6 +614,9 @@ class CityModel(ap.Model):
             self.oxygen_points.remove(agent)
 
     def collect_step_data(self):
+
+        if "semaforos_steps" not in self.simulation_data:
+            self.simulation_data["semaforos_steps"] = []
         explorer_data_dict = {
             "step" :int(self.steps_counter),
             "agents":[
@@ -539,16 +634,52 @@ class CityModel(ap.Model):
         }
 
         peatones_data_dict = {
+        "step" :int(self.steps_counter),
+        "agents":[
+            {
+                "id":int(peatone.id),
+                "x":int(peatone.x),
+                "y":int(EXPLORERS_Z_VALUE),
+                "z":int(peatone.y),
 
+            }
+            for peatone in self.peatones
+        ]
+
+
+        }
+
+        semaforos_data_dict = {
+            "step": int(self.steps_counter),
+            "semaforos": [
+                {
+                    "id": int(semaforo.id),
+                    "x": int(semaforo.x),
+                    "y": int(semaforo.y),
+                    "state": semaforo.state == 'GREEN'  # True si es verde, False si es rojo
+                }
+                for semaforo in self.semaforos
+            ]
         }
 
         self.simulation_data["explorers_steps"].append(explorer_data_dict)
 
+        self.simulation_data["peatones_positions"].append(peatones_data_dict)
+
+        self.simulation_data["semaforos_steps"].append(semaforos_data_dict)
+
+
+
+
 
     def end(self):
-        # This method is automatically called by AgentPy when the simulation ends
         super().end()
         self.finalize_simulation_data()
+
+
+
+
+
 
 # ============= EJECUCIÓN DE LA SIMULACIÓN =============
 
@@ -562,6 +693,13 @@ oxygen_positions = []
 peaton_positions = []
 semaforo_positions = []
 anuncio_positions = []
+defenseSystems_positions = []
+solarPanels_positions = []
+alienPlants_positions= []
+foodTrucks_positions = []
+spaceEquipments_positions = []
+publicLamp_positions = []
+
 
 for _ in range(N_STEPS):
     model.step()
@@ -571,7 +709,28 @@ for _ in range(N_STEPS):
     peaton_positions.append([(p.x, p.y) for p in model.peatones])
     semaforo_positions.append([(s.x, s.y, s.state) for s in model.semaforos])
     anuncio_positions.append([(a.x,a.y) for a in model.anuncios])
+    defenseSystems_positions.append([(a.x, a.y) for a in model.defenseSystems])
+    solarPanels_positions.append([(a.x, a.y) for a in model.solarPanels])
+    alienPlants_positions.append([(a.x, a.y) for a in model.alienPlants])
+    foodTrucks_positions.append([(a.x, a.y) for a in model.foodTruck])
+    spaceEquipments_positions.append([(a.x, a.y) for a in model.spaceEquipment])
+    publicLamp_positions.append([(a.x, a.y) for a in model.publicLamp])
+
+
 model.end()
+
+
+# Imprimir posiciones de peatones DESPUÉS de model.end()
+for step_data in model.simulation_data["peatones_positions"]:
+    step_number = step_data["step"]
+    print(f"Posiciones de peatones en el paso {step_number}:")
+    for peaton_data in step_data["agents"]:
+        peaton_id = peaton_data["id"]
+        x = peaton_data["x"]
+        z = peaton_data["z"]
+        print(f"  Peatón ID: {peaton_id}, Posición: (x={x}, z={z})")
+
+
 # --- Animación ---
 fig, ax = plt.subplots(figsize=(10, 10))
 ax.imshow(city_grid, cmap="tab10", alpha=0.6)
@@ -579,6 +738,12 @@ ax.imshow(city_grid, cmap="tab10", alpha=0.6)
 # Scatter de cada tipo de agente
 scat_agents = ax.scatter([], [], c='red', s=50, label='Moving Agents')
 scat_anouncements = ax.scatter([], [], c='purple', s=120, label='Anouncements')
+scat_defenseSystems = ax.scatter([], [], c='pink', s=120, label='defense systems')
+scat_solarPanel= ax.scatter([], [], c='yellow', s=120, label='solar panels')
+scat_alienPlants= ax.scatter([], [], c='green', s=120, label='alien plants')
+scat_foodTrucks= ax.scatter([], [], c='gray', s=120, label='food trucks')
+scat_spaceEquipment = ax.scatter([], [], c='white', s=120, label='space equipment')
+scat_PublicLamp = ax.scatter([], [], c='orange', s=120, label='public lamp')
 scat_domes = ax.scatter([], [], c='blue', s=100, marker='s', label='Domes')
 scat_oxy = ax.scatter([], [], c='green', s=30, marker='^', label='Oxygen')
 scat_peaton = ax.scatter([], [], c='black', s=30, marker='o', label='Peaton')
@@ -618,6 +783,47 @@ def update(frame):
         x_anouncements, y_anouncements = [], []
     scat_anouncements.set_offsets(np.c_[y_anouncements, x_anouncements])
 
+    positions_defenseSystmes = defenseSystems_positions[frame]  # correccion
+    if positions_defenseSystmes:
+        x_anouncements2, y_anouncements2 = zip(*positions_defenseSystmes)
+    else:
+        x_anouncements2, y_anouncements2 = [], []
+    scat_defenseSystems.set_offsets(np.c_[y_anouncements2, x_anouncements2])
+
+    positions_solarPanel = solarPanels_positions[frame]  # correccion
+    if positions_solarPanel:
+        x_anouncements2, y_anouncements2 = zip(*positions_solarPanel)
+    else:
+        x_anouncements2, y_anouncements2 = [], []
+    scat_solarPanel.set_offsets(np.c_[y_anouncements2, x_anouncements2])
+
+    positions_alienPlants = alienPlants_positions[frame]  # correccion
+    if positions_alienPlants:
+        x_anouncements2, y_anouncements2 = zip(*positions_alienPlants)
+    else:
+        x_anouncements2, y_anouncements2 = [], []
+    scat_alienPlants.set_offsets(np.c_[y_anouncements2, x_anouncements2])
+
+    positions_foodTrucks = foodTrucks_positions[frame]  # correccion
+    if positions_foodTrucks:
+        x_anouncements2, y_anouncements2 = zip(*positions_foodTrucks)
+    else:
+        x_anouncements2, y_anouncements2 = [], []
+    scat_foodTrucks.set_offsets(np.c_[y_anouncements2, x_anouncements2])
+
+    positions_spaceEquipment = spaceEquipments_positions[frame]  # correccion
+    if positions_spaceEquipment:
+        x_anouncements2, y_anouncements2 = zip(*positions_spaceEquipment)
+    else:
+        x_anouncements2, y_anouncements2 = [], []
+    scat_spaceEquipment.set_offsets(np.c_[y_anouncements2, x_anouncements2])
+
+    positions_publicLamp = publicLamp_positions[frame]  # correccion
+    if positions_publicLamp:
+        x_anouncements2, y_anouncements2 = zip(*positions_publicLamp)
+    else:
+        x_anouncements2, y_anouncements2 = [], []
+    scat_PublicLamp.set_offsets(np.c_[y_anouncements2, x_anouncements2])
 
     # 4) Peatones
     positions_p = peaton_positions[frame]
@@ -648,6 +854,5 @@ def update(frame):
 ani = animation.FuncAnimation(fig, update, frames=N_STEPS, interval=300)
 plt.legend()
 plt.show()
-
 
 #
